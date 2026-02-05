@@ -1,0 +1,54 @@
+/* DMPool Admin Styles */
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+
+#app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* OCEAN primary color */
+.text-ocean-primary {
+  color: #38bdf8;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Naive UI theme overrides */
+.n-layout {
+  background-color: #0f172a !important;
+}
+
+.n-layout-sider {
+  background-color: #1e293b !important;
+}
+
+.n-menu {
+  background-color: #1e293b !important;
+}

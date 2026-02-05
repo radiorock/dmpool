@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DMPool 管理后台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        * {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .status-pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .gradient-border {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 1px;
+            border-radius: 16px;
+        }
+
+        .gradient-border > div {
+            background: #1a1a2e;
+            border-radius: 15px;
+        }
+
+        /* Login Modal */
+        #login-modal {
+            backdrop-filter: blur(10px);
+        }
+
+        .input-field {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .input-field:focus {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(102, 126, 234, 0.5);
+            outline: none;
+        }
+
+        /* Main content hidden when not logged in */
+        .main-content {
+            display: none;
+        }
+
+        .main-content.logged-in {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-[#0a0a0f] text-white min-h-screen">
+    <!-- Login Modal -->
+    <div id="login-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="glass rounded-3xl p-8 w-full max-w-md mx-4 shadow-2xl">
+            <div class="text-center mb-8">
+                <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                    <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-bold">DMPool 管理后台</h1>
+                <p class="text-gray-400 mt-2">请登录以继续</p>
+            </div>
+
+            <form id="login-form" class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">用户名</label>
+                    <input
+                        type="text"
+                        id="username"
+                        class="input-field w-full px-4 py-3 rounded-xl text-white placeholder-gray-500"
+                        placeholder="输入用户名"
+                        autocomplete="username"
+                        required
+                    >
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">密码</label>
+                    <input
+                        type="password"
+                        id="password"
+                        class="input-field w-full px-4 py-3 rounded-xl text-white placeholder-gray-500"
+                        placeholder="输入密码"
+                        autocomplete="current-password"
+                        required
+                    >
+                </div>
+
+                <div id="login-error" class="hidden text-red-400 text-sm text-center"></div>
+
+                <button
+                    type="submit"
+                    id="login-btn"
+                    class="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-medium py-3 px-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <span id="login-btn-text">登录</span>
+                    <span id="login-btn-loading" class="hidden">
+                        <svg class="animate-spin h-5 w-5 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </span>
+                </button>
+            </form>
+
+            <p class="mt-6 text-center text-sm text-gray-500">
+                默认账号: <span class="text-gray-400">admin</span> / <span class="text-gray-400">admin123</span>
+            </p>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main-content" class="main-content">
+        <!-- Header -->
+        <header class="bg-[#12121a]/80 backdrop-blur-xl border-b border-white/10 sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h1 class="text-xl font-semibold">DMPool</h1>
+                            <p class="text-xs text-gray-400">管理后台</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <div class="flex items-center gap-2 text-sm text-gray-400">
+                            <span class="w-2 h-2 rounded-full bg-green-500 status-pulse"></span>
+                            <span id="system-status">运行中</span>
+                        </div>
+                        <div class="text-sm text-gray-400">
+                            运行时间: <span id="uptime">--</span>
+                        </div>
+                        <a
+                            href="/observer"
+                            class="text-sm text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1"
+                            title="观察者链接"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                            </svg>
+                            观察
+                        </a>
+                        <button
+                            onclick="logout()"
+                            class="text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                            </svg>
+                            退出
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto px-6 py-8">
+            <!-- Status Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <!-- Overall Status -->
+                <div class="gradient-border card-hover">
+                    <div class="p-5">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-gray-400 text-sm">系统状态</span>
+                            <span id="overall-status-icon" class="text-2xl">🟢</span>
+                        </div>
+                        <div id="overall-status" class="text-2xl font-bold">健康</div>
+                        <div id="overall-status-detail" class="text-xs text-gray-500 mt-1">所有服务正常运行</div>
+                    </div>
+                </div>
+
+                <!-- Bitcoin Node -->
+                <div class="glass rounded-2xl p-5 card-hover">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-gray-400 text-sm">Bitcoin 节点</span>
+                        <span id="btc-status-icon" class="text-xl">⏳</span>
+                    </div>
+                    <div id="btc-status" class="text-lg font-semibold">检查中...</div>
+                    <div id="btc-sync" class="text-xs text-gray-500 mt-1">--</div>
+                </div>
+
+                <!-- Stratum -->
+                <div class="glass rounded-2xl p-5 card-hover">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-gray-400 text-sm">Stratum 服务</span>
+                        <span id="stratum-status-icon" class="text-xl">⏳</span>
+                    </div>
+                    <div id="stratum-status" class="text-lg font-semibold">检查中...</div>
+                    <div id="stratum-connections" class="text-xs text-gray-500 mt-1">--</div>
+                </div>
+
+                <!-- Database -->
+                <div class="glass rounded-2xl p-5 card-hover">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-gray-400 text-sm">存储状态</span>
+                        <span id="db-status-icon" class="text-xl">⏳</span>
+                    </div>
+                    <div id="db-status" class="text-lg font-semibold">检查中...</div>
+                    <div id="db-latency" class="text-xs text-gray-500 mt-1">--</div>
+                </div>
+            </div>
+
+            <!-- Detailed Status Section -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <!-- Bitcoin Node Details -->
+                <div class="glass rounded-2xl p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <span class="text-2xl">₿</span>
+                        Bitcoin 节点详情
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center py-2 border-b border-white/5">
+                            <span class="text-gray-400">区块高度</span>
+                            <span id="btc-blocks" class="font-mono">--</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-white/5">
+                            <span class="text-gray-400">同步进度</span>
+                            <span id="btc-sync-progress" class="font-mono">--</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-white/5">
+                            <span class="text-gray-400">连接节点</span>
+                            <span id="btc-peers" class="font-mono">--</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-white/5">
+                            <span class="text-gray-400">RPC 延迟</span>
+                            <span id="btc-latency" class="font-mono">--</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2">
+                            <span class="text-gray-400">最新区块</span>
+                            <span id="btc-best-hash" class="font-mono text-xs text-gray-500 truncate max-w-[200px]">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stratum Details -->
+                <div class="glass rounded-2xl p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <span class="text-2xl">⛏️</span>
+                        Stratum 服务详情
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center py-2 border-b border-white/5">
+                            <span class="text-gray-400">监听端口</span>
+                            <span id="stratum-port" class="font-mono">3333</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-white/5">
+                            <span class="text-gray-400">活跃连接</span>
+                            <span id="stratum-active" class="font-mono">--</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-white/5">
+                            <span class="text-gray-400">Shares/秒</span>
+                            <span id="stratum-sps" class="font-mono">--</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2">
+                            <span class="text-gray-400">当前难度</span>
+                            <span id="stratum-diff" class="font-mono">--</span>
+                        </div>
+                    </div>
+
+                    <!-- Mini Chart -->
+                    <div class="mt-4 pt-4 border-t border-white/10">
+                        <canvas id="sharesChart" height="100"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="glass rounded-2xl p-6">
+                <h3 class="text-lg font-semibold mb-4">快速操作</h3>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <button onclick="refreshStatus()" class="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                        <span>刷新状态</span>
+                    </button>
+                    <button onclick="showConfig()" class="bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 px-4 py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        </svg>
+                        <span>配置管理</span>
+                    </button>
+                    <button onclick="showWorkers()" class="bg-green-500/10 hover:bg-green-500/20 text-green-400 px-4 py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+                        </svg>
+                        <span>矿工管理</span>
+                    </button>
+                    <a href="/observer" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 px-4 py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                        </svg>
+                        <span>观察者</span>
+                    </a>
+                    <button onclick="showLogs()" class="bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 px-4 py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        <span>操作日志</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Last Updated -->
+            <div class="mt-8 text-center text-sm text-gray-500">
+                最后更新: <span id="last-update">--</span>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let sharesChart = null;
+        let sharesHistory = [];
+        let authToken = localStorage.getItem('dmpool_token');
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            if (authToken) {
+                showMainContent();
+            } else {
+                showLoginModal();
+            }
+        });
+
+        // Check if token is valid
+        async function checkAuth() {
+            if (!authToken) return false;
+            try {
+                const response = await fetch('/api/dashboard', {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                return response.ok;
+            } catch {
+                return false;
+            }
+        }
+
+        // Show main content
+        function showMainContent() {
+            document.getElementById('login-modal').classList.add('hidden');
+            document.getElementById('main-content').classList.add('logged-in');
+            initChart();
+            refreshStatus();
+            setInterval(refreshStatus, 10000); // 每10秒刷新
+        }
+
+        // Show login modal
+        function showLoginModal() {
+            document.getElementById('login-modal').classList.remove('hidden');
+            document.getElementById('main-content').classList.remove('logged-in');
+        }
+
+        // Login form handler
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorEl = document.getElementById('login-error');
+            const btn = document.getElementById('login-btn');
+            const btnText = document.getElementById('login-btn-text');
+            const btnLoading = document.getElementById('login-btn-loading');
+
+            // Clear previous errors
+            errorEl.classList.add('hidden');
+            btn.disabled = true;
+            btnText.classList.add('hidden');
+            btnLoading.classList.remove('hidden');
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.data) {
+                    authToken = data.data.token;
+                    localStorage.setItem('dmpool_token', authToken);
+                    showMainContent();
+                } else {
+                    errorEl.textContent = data.message || '登录失败，请检查用户名和密码';
+                    errorEl.classList.remove('hidden');
+                }
+            } catch (error) {
+                errorEl.textContent = '网络错误，请稍后重试';
+                errorEl.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btnText.classList.remove('hidden');
+                btnLoading.classList.add('hidden');
+            }
+        });
+
+        // Logout
+        function logout() {
+            localStorage.removeItem('dmpool_token');
+            authToken = null;
+            showLoginModal();
+        }
+
+        // Authenticated API request helper
+        async function apiRequest(url) {
+            const response = await fetch(url, {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+
+            if (response.status === 401) {
+                logout();
+                throw new Error('Unauthorized');
+            }
+
+            return response;
+        }
+
+        function initChart() {
+            const ctx = document.getElementById('sharesChart').getContext('2d');
+            sharesChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Shares/s',
+                        data: [],
+                        borderColor: 'rgb(59, 130, 246)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#fff',
+                            bodyColor: '#fff',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            borderWidth: 1,
+                            cornerRadius: 8,
+                            displayColors: false,
+                            callbacks: {
+                                label: function(context) {
+                                    return context.parsed.y.toFixed(2) + ' Shares/s';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: {
+                                color: 'rgba(255,255,255,0.5)',
+                                font: { size: 11 }
+                            }
+                        },
+                        x: {
+                            display: false
+                        }
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    }
+                }
+            });
+        }
+
+        async function refreshStatus() {
+            try {
+                const response = await apiRequest('/api/services/status');
+                const data = await response.json();
+
+                if (data.status === 'ok') {
+                    updateUI(data.data);
+                } else {
+                    showError('获取状态失败: ' + (data.message || '未知错误'));
+                }
+            } catch (error) {
+                if (error.message !== 'Unauthorized') {
+                    showError('连接服务器失败: ' + error.message);
+                }
+            }
+        }
+
+        function updateUI(status) {
+            // Overall status
+            const overallStatus = document.getElementById('overall-status');
+            const overallIcon = document.getElementById('overall-status-icon');
+
+            if (status.status === 'healthy') {
+                overallStatus.textContent = '健康';
+                overallStatus.className = 'text-2xl font-bold text-green-400';
+                overallIcon.textContent = '🟢';
+            } else if (status.status === 'degraded') {
+                overallStatus.textContent = '警告';
+                overallStatus.className = 'text-2xl font-bold text-yellow-400';
+                overallIcon.textContent = '🟡';
+            } else {
+                overallStatus.textContent = '异常';
+                overallStatus.className = 'text-2xl font-bold text-red-400';
+                overallIcon.textContent = '🔴';
+            }
+
+            // Bitcoin node
+            const btc = status.bitcoin_node;
+            document.getElementById('btc-status').textContent = btc.status === 'healthy' ? '在线' : btc.status;
+            document.getElementById('btc-status-icon').textContent = btc.status === 'healthy' ? '✅' : '❌';
+            document.getElementById('btc-blocks').textContent = btc.blockchain.blocks.toLocaleString();
+            document.getElementById('btc-sync').textContent = btc.sync_progress < 1
+                ? `同步中 ${(btc.sync_progress * 100).toFixed(1)}%`
+                : '已同步';
+            document.getElementById('btc-sync-progress').textContent = (btc.sync_progress * 100).toFixed(2) + '%';
+            document.getElementById('btc-peers').textContent = btc.network.connections.toLocaleString();
+            document.getElementById('btc-latency').textContent = btc.rpc_latency_ms ? btc.rpc_latency_ms + 'ms' : '--';
+            document.getElementById('btc-best-hash').textContent = btc.blockchain.best_block_hash.substring(0, 16) + '...';
+
+            // Stratum
+            const stratum = status.stratum;
+            document.getElementById('stratum-status').textContent = stratum.listening ? '监听中' : '未监听';
+            document.getElementById('stratum-status-icon').textContent = stratum.listening ? '✅' : '❌';
+            document.getElementById('stratum-connections').textContent = stratum.active_connections + ' 个连接';
+            document.getElementById('stratum-active').textContent = stratum.active_connections;
+            document.getElementById('stratum-sps').textContent = stratum.shares_per_second.toFixed(1);
+            document.getElementById('stratum-diff').textContent = stratum.current_difficulty.toFixed(1);
+
+            // Update chart
+            if (sharesChart) {
+                const now = new Date().toLocaleTimeString();
+                sharesHistory.push({ time: now, value: stratum.shares_per_second });
+                // Keep 60 data points (10 minutes at 10s refresh)
+                if (sharesHistory.length > 60) sharesHistory.shift();
+
+                sharesChart.data.labels = sharesHistory.map(h => h.time);
+                sharesChart.data.datasets[0].data = sharesHistory.map(h => h.value);
+                sharesChart.update('none');
+            }
+
+            // Database
+            const db = status.database;
+            document.getElementById('db-status').textContent = db.status === 'healthy' ? '正常' : db.status;
+            document.getElementById('db-status-icon').textContent = db.status === 'healthy' ? '✅' : '❌';
+            document.getElementById('db-latency').textContent = db.latency_ms ? db.latency_ms + 'ms' : '--';
+
+            // Uptime
+            const uptime = status.uptime_seconds;
+            const hours = Math.floor(uptime / 3600);
+            const minutes = Math.floor((uptime % 3600) / 60);
+            document.getElementById('uptime').textContent = `${hours}小时${minutes}分钟`;
+
+            // Last update
+            document.getElementById('last-update').textContent = new Date().toLocaleString();
+        }
+
+        function showError(message) {
+            document.getElementById('overall-status').textContent = '错误';
+            document.getElementById('overall-status').className = 'text-2xl font-bold text-red-400';
+            document.getElementById('overall-status-detail').textContent = message;
+        }
+
+        async function showConfig() {
+            try {
+                const response = await apiRequest('/api/config');
+                const result = await response.json();
+
+                if (result.status === 'ok') {
+                    const config = result.data;
+                    const configInfo = `
+当前配置:
+- Stratum 端口: ${config.stratum_port}
+- 主机名: ${config.stratum_hostname}
+- 起始难度: ${config.start_difficulty}
+- 最小难度: ${config.minimum_difficulty}
+- PPLNS TTL: ${config.pplns_ttl_days} 天
+- 网络: ${config.network}
+- Pool 签名: ${config.pool_signature || '无'}
+- 忽略难度: ${config.ignore_difficulty ? '是' : '否'}
+- 捐赠比例: ${config.donation ? (config.donation / 100) + '%' : '无'}
+                    `;
+                    alert(configInfo);
+                } else {
+                    alert('获取配置失败: ' + (result.message || '未知错误'));
+                }
+            } catch (error) {
+                alert('获取配置失败: ' + error.message);
+            }
+        }
+
+        async function showWorkers() {
+            try {
+                const response = await apiRequest('/api/workers?page=1&page_size=50');
+                const result = await response.json();
+
+                if (result.status === 'ok') {
+                    const data = result.data;
+                    let message = `矿工列表 (共 ${data.total} 个):\n\n`;
+
+                    if (data.data.length === 0) {
+                        message = '暂无活跃矿工。\n\n矿工需要提交至少一个 Share 后才会显示在此列表中。';
+                    } else {
+                        data.data.forEach((worker, idx) => {
+                            message += `${idx + 1}. ${worker.worker_name}\n`;
+                            message += `   地址: ${worker.address.substring(0, 20)}...\n`;
+                            message += `   Shares: ${worker.shares_count.toLocaleString()}\n`;
+                            message += `   难度: ${worker.difficulty}\n`;
+                            message += `   最后提交: ${worker.last_seen}\n`;
+                            message += `   状态: ${worker.status}\n\n`;
+                        });
+
+                        if (data.total > data.page_size) {
+                            message += `\n... 还有 ${data.total - data.page_size} 个矿工未显示`;
+                        }
+                    }
+
+                    alert(message);
+                } else {
+                    alert('获取矿工列表失败: ' + (result.message || '未知错误'));
+                }
+            } catch (error) {
+                alert('获取矿工列表失败: ' + error.message);
+            }
+        }
+
+        async function showLogs() {
+            try {
+                const response = await apiRequest('/api/logs');
+                const result = await response.json();
+
+                if (result.status === 'ok') {
+                    const logs = result.data;
+                    let message = '最近的操作日志:\n\n';
+                    logs.forEach(log => {
+                        message += log + '\n';
+                    });
+                    alert(message);
+                } else {
+                    alert('获取日志失败: ' + (result.message || '未知错误'));
+                }
+            } catch (error) {
+                alert('获取日志失败: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

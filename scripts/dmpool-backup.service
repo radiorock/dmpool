@@ -1,0 +1,15 @@
+[Unit]
+Description=DMPool Automated Backup
+After=network.target
+
+[Service]
+Type=oneshot
+User=k0n9
+Group=k0n9
+WorkingDirectory=/home/k0n9/dmpool
+ExecStart=/home/k0n9/dmpool/scripts/backup.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+FROM prom/prometheus:v3.6.0
+
+# Copy default prometheus configuration
+COPY ./prometheus/prometheus.yml /etc/prometheus/prometheus.yml
+
+# Copy and set up entrypoint script to support optional config override
+COPY --chmod=755 ./docker/prometheus-entrypoint.sh /usr/local/bin/prometheus-entrypoint.sh
+
+# Override entrypoint to support custom config fallback
+ENTRYPOINT ["/usr/local/bin/prometheus-entrypoint.sh"]
+
+# Default command arguments (can be overridden in docker-compose)
+CMD ["--storage.tsdb.path=/prometheus", \
+    "--web.enable-admin-api", \
+    "--storage.tsdb.retention.time=15d", \
+    "--storage.tsdb.retention.size=40GB", \
+    "--web.console.libraries=/usr/share/prometheus/console_libraries", \
+    "--web.console.templates=/usr/share/prometheus/consoles"]

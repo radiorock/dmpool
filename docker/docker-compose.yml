@@ -1,0 +1,104 @@
+services:
+  hydrapool:
+    image: ghcr.io/256foundation/hydrapool:latest
+    environment:
+      - RUST_LOG=info
+    # Config is mounted from local file - edit docker/config.toml to customize
+    volumes:
+      - ./config.toml:/etc/hydrapool/config.toml:ro
+      - hydrapool_data:/var/lib/hydrapool
+      - hydrapool_logs:/var/log/hydrapool
+    restart: unless-stopped
+    ports:
+      - "3333:3333"      # Stratum mining port
+      - "46884:46884"    # API server port
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "--http-user=hydrapool", "--http-password=hydrapool", "--auth-no-challenge", "http://localhost:46884/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - hydrapool_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  hydrapool-cli:
+    image: ghcr.io/256foundation/hydrapool:latest
+    profiles: [cli]  # Prevents auto-start with docker compose up
+    entrypoint: ["/usr/local/bin/hydrapool_cli", "--config", "/etc/hydrapool/config.toml"]
+    volumes:
+      - ./config.toml:/etc/hydrapool/config.toml:ro
+      - hydrapool_data:/var/lib/hydrapool
+    networks:
+      - hydrapool_network
+
+  prometheus:
+    image: ghcr.io/256foundation/hydrapool-prometheus:latest
+    depends_on:
+      hydrapool:
+        condition: service_healthy
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.custom.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-admin-api'
+      - "--storage.tsdb.retention.time=15d"
+      - "--storage.tsdb.retention.size=40GB"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  grafana:
+    image: ghcr.io/256foundation/hydrapool-grafana:latest
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/pool.json
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  hydrapool_data:
+  hydrapool_logs:
+
+networks:
+  hydrapool_network:
+    driver: bridge

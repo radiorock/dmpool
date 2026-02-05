@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles for DMPool Observer */
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-gray-950 text-gray-100 antialiased;
+  min-height: 100vh;
+}
+
+/* OCEAN-style dark theme colors */
+.bg-ocean-dark {
+  background-color: #0a0e1a;
+}
+
+.bg-ocean-card {
+  background-color: #111827;
+  border: 1px solid #1f2937;
+}
+
+.text-ocean-primary {
+  color: #38bdf8;
+}
+
+.text-ocean-secondary {
+  color: #60a5fa;
+}
+
+.border-ocean {
+  border-color: #1e40af;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1f2937;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
+/* Animations */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+  }
+   50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Bitcoin address truncation */
+.btc-address {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+}
+
+.btc-address-short {
+  display: inline-block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Loading spinner */
+.spinner {
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

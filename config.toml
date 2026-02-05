@@ -1,0 +1,60 @@
+# DMPool Configuration
+# Fixed for production use
+
+[store]
+path = ./store.db
+background_task_frequency_hours = 24
+pplns_ttl_days = 7
+
+[stratum]
+hostname = 0.0.0.0
+port = 3333
+start_difficulty = 32
+minimum_difficulty = 16
+
+# IMPORTANT: Set this to YOUR Bitcoin address for miner payouts
+bootstrap_address = bc1qce93hy5rhg02s6aeu7mfdvxg76x66pqqtrvzs3
+
+# Developer donation (optional, in basis points: 100 = 1%)
+# Recommended: 0 for no donation, or 50 for 0.5% to support development
+# donation_address = bc1qce93hy5rhg02s6aeu7mfdvxg76x66pqqtrvzs3
+# donation = 0
+
+# Pool operator fee (optional, in basis points: 100 = 1%)
+# Uncomment and set your fee address if you want to charge a fee
+# fee_address = your_fee_address_here
+# fee = 200
+
+# CRITICAL: Do NOT ignore difficulty in production
+ignore_difficulty = false
+
+# Bitcoin node ZMQ endpoint
+zmqpubhashblock = tcp://127.0.0.1:28334
+
+# Network: main, testnet4, or signet
+network = main
+version_mask = 1fffe000
+
+# PPLNS difficulty multiplier (1.0 = standard window size)
+difficulty_multiplier = 1.0
+
+# Pool signature (max 16 bytes, comment out for anonymous mining)
+pool_signature = dmpool
+
+[bitcoinrpc]
+# RPC credentials
+url = http://127.0.0.1:38332
+username = p2pool
+password = p2pool
+
+[logging]
+# Log file path (comment out for console only)
+# file = ./logs/dmpool.log
+level = info
+stats_dir = ./logs/stats
+
+[api]
+hostname = 0.0.0.0
+port = 46884
+auth_user = dmpool
+auth_token = 0d74058f74ad3b6768493cedb5e9492ba2599d5f4003c291e141762d0e43808cfd932f04a8260e94c375d1574599dbf

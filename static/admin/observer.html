@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DMPool 观察者</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --bg-primary: #fafafa;
+            --bg-secondary: #ffffff;
+            --bg-accent: #f0f4ff;
+            --text-primary: #1a1a2e;
+            --text-secondary: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-green: #10b981;
+            --border-color: #e5e7eb;
+        }
+
+        * {
+            font-family: 'Inter', -apple-system, sans-serif;
+        }
+
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            transition: all 0.2s ease;
+        }
+
+        .card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-accent) 100%);
+        }
+
+        .input-search {
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            padding: 14px 18px;
+            font-size: 15px;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        .input-search:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 14px 28px;
+            font-weight: 600;
+            font-size: 15px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .loader {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .pulse-dot {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .status-online {
+            color: var(--accent-green);
+        }
+
+        .status-offline {
+            color: #ef4444;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hashrate-display {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .worker-online {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--accent-green);
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .worker-online::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: var(--accent-green);
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-semibold">DMPool</h1>
+                        <p class="text-xs text-gray-500">观察者链接</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 text-sm text-gray-500">
+                    <span class="pulse-dot w-2 h-2 rounded-full bg-green-500"></span>
+                    <span>在线</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-6xl mx-auto px-6 py-8">
+        <!-- Search Section -->
+        <div id="search-section" class="card p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-2">查询矿工统计</h2>
+            <p class="text-gray-500 text-sm mb-5">
+                输入 Bitcoin 地址查看挖矿统计、算力、Worker 状态等信息
+            </p>
+            <form id="search-form" class="flex gap-3">
+                <input
+                    type="text"
+                    id="address-input"
+                    class="input-search flex-1"
+                    placeholder="bc1q... 或输入比特币地址"
+                >
+                <button type="submit" class="btn-primary">
+                    查询
+                </button>
+            </form>
+            <div id="search-error" class="hidden mt-3 text-red-500 text-sm"></div>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading" class="hidden">
+            <div class="flex flex-col items-center justify-center py-20">
+                <div class="loader mb-4"></div>
+                <p class="text-gray-500">加载中...</p>
+            </div>
+        </div>
+
+        <!-- No Data -->
+        <div id="no-data" class="hidden">
+            <div class="card p-12 text-center">
+                <div class="text-6xl mb-4 opacity-50">🔍</div>
+                <h3 class="text-xl font-semibold mb-2">未找到数据</h3>
+                <p class="text-gray-500">
+                    该地址在过去 24 小时内没有提交任何 Share。
+                    <br>请确保地址正确，或者该矿工最近才开始挖矿。
+                </p>
+            </div>
+        </div>
+
+        <!-- Stats Display -->
+        <div id="stats-content" class="hidden">
+            <!-- Address Card -->
+            <div class="card p-5 mb-6">
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <div class="text-sm text-gray-500 mb-1">Bitcoin 地址</div>
+                        <div class="flex items-center gap-2">
+                            <div id="stats-address" class="mono text-base font-medium text-gray-900">--</div>
+                            <button onclick="copyAddress()" class="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition-colors" title="复制地址">
+                                📋 复制
+                            </button>
+                            <button onclick="showQRCode()" class="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition-colors" title="显示二维码">
+                                📱 QR
+                            </button>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-sm text-gray-500 mb-1">数据周期</div>
+                        <div class="text-base font-semibold gradient-text">24 小时</div>
+                    </div>
+                </div>
+                <!-- QR Code Modal -->
+                <div id="qrcode-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div class="bg-white rounded-2xl p-6 max-w-sm mx-4">
+                        <div class="text-center mb-4">
+                            <div id="qrcode" class="w-48 h-48 mx-auto"></div>
+                            <p class="text-sm text-gray-600 mt-2">扫描查看此地址的挖矿统计</p>
+                        </div>
+                        <button onclick="hideQRCode()" class="w-full bg-gray-100 hover:bg-gray-200 py-2 rounded-lg transition-colors">
+                            关闭
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Key Metrics -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <!-- Hashrate -->
+                <div class="stat-card card p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm text-gray-600">估计算力</span>
+                        <span class="text-2xl">⚡</span>
+                    </div>
+                    <div id="stats-hashrate" class="hashrate-display">--</div>
+                    <div class="text-xs text-gray-500 mt-2">基于 24h Shares</div>
+                </div>
+
+                <!-- Total Shares -->
+                <div class="card p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm text-gray-600">总 Shares</span>
+                        <span class="text-2xl">📊</span>
+                    </div>
+                    <div id="stats-shares" class="text-2xl font-bold text-gray-900">--</div>
+                    <div class="text-xs text-gray-500 mt-2">过去 24 小时</div>
+                </div>
+
+                <!-- Workers -->
+                <div class="card p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm text-gray-600">活跃 Workers</span>
+                        <span class="text-2xl">⛏️</span>
+                    </div>
+                    <div id="stats-workers" class="text-2xl font-bold text-gray-900">--</div>
+                    <div class="text-xs text-gray-500 mt-2">在线矿机数量</div>
+                </div>
+
+                <!-- Last Share -->
+                <div class="card p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm text-gray-600">最后 Share</span>
+                        <span class="text-2xl">🕐</span>
+                    </div>
+                    <div id="stats-last-share" class="text-lg font-bold text-gray-900">--</div>
+                    <div id="stats-last-share-ago" class="text-xs text-gray-500 mt-2">--</div>
+                </div>
+            </div>
+
+            <!-- Workers Table -->
+            <div class="card mb-8">
+                <div class="p-6 border-b border-gray-100">
+                    <h3 class="text-lg font-semibold">Workers 详情</h3>
+                </div>
+                <div class="overflow-x-auto">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Worker 名称</th>
+                                <th class="text-right">Shares</th>
+                                <th class="text-right">难度</th>
+                                <th>最后提交</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="workers-table-body">
+                            <!-- Dynamic content -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Chart -->
+            <div class="card p-6 mb-8">
+                <h3 class="text-lg font-semibold mb-4">Share 分布</h3>
+                <canvas id="sharesChart" height="200"></canvas>
+            </div>
+
+            <!-- Recent Shares -->
+            <div class="card mb-8">
+                <div class="p-6 border-b border-gray-100 flex justify-between items-center">
+                    <h3 class="text-lg font-semibold">最近 Shares</h3>
+                    <span class="text-sm text-gray-500">最近 100 条</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th class="text-right">难度</th>
+                                <th>Worker</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="shares-table-body">
+                            <!-- Dynamic content -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Payouts -->
+            <div class="card">
+                <div class="p-6 border-b border-gray-100">
+                    <h3 class="text-lg font-semibold">支付记录</h3>
+                </div>
+                <div class="p-6 text-center text-gray-500">
+                    <p>暂无支付记录</p>
+                    <p class="text-sm mt-2">支付功能开发中...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="mt-8 text-center text-sm text-gray-400">
+            数据实时更新 | 最后更新: <span id="last-update">--</span>
+        </div>
+    </main>
+
+    <script>
+        let sharesChart = null;
+        let currentAddress = null;
+        let refreshInterval = null;
+
+        function getAddressFromUrl() {
+            const pathParts = window.location.pathname.split('/');
+            if (pathParts.length >= 3 && pathParts[1] === 'observer') {
+                return pathParts[2];
+            }
+            return null;
+        }
+
+        function formatRelativeTime(timestamp) {
+            if (!timestamp) return '--';
+            const now = Math.floor(Date.now() / 1000);
+            const diff = now - timestamp;
+
+            if (diff < 60) return '刚刚';
+            if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+            if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+            return Math.floor(diff / 86400) + ' 天前';
+        }
+
+        function formatHashrate(ths) {
+            if (ths < 0.001) return '< 0.001 TH/s';
+            if (ths < 1) return (ths * 1000).toFixed(2) + ' GH/s';
+            return ths.toFixed(2) + ' TH/s';
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '--';
+            return new Date(timestamp * 1000).toLocaleString('zh-CN');
+        }
+
+        async function fetchObserverData(address) {
+            try {
+                const response = await fetch(`/api/observer/${encodeURIComponent(address)}`);
+                const result = await response.json();
+
+                if (result.status === 'ok') {
+                    return result.data;
+                } else {
+                    throw new Error(result.message || '获取数据失败');
+                }
+            } catch (error) {
+                console.error('Failed to fetch observer data:', error);
+                throw error;
+            }
+        }
+
+        function updateUI(data) {
+            document.getElementById('stats-address').textContent = data.address;
+            document.getElementById('stats-hashrate').textContent = formatHashrate(data.hashrate_ths);
+            document.getElementById('stats-shares').textContent = data.total_shares.toLocaleString();
+            document.getElementById('stats-workers').textContent = Object.keys(data.workers).length;
+
+            if (data.last_share) {
+                document.getElementById('stats-last-share').textContent = formatRelativeTime(data.last_share);
+                document.getElementById('stats-last-share-ago').textContent = formatTimestamp(data.last_share);
+            } else {
+                document.getElementById('stats-last-share').textContent = '--';
+                document.getElementById('stats-last-share-ago').textContent = '无数据';
+            }
+
+            const tbody = document.getElementById('workers-table-body');
+            tbody.innerHTML = '';
+
+            const workers = Object.values(data.workers).sort((a, b) => b.shares - a.shares);
+
+            for (const worker of workers) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="mono text-sm">${worker.name}</td>
+                    <td class="text-right font-medium">${worker.shares.toLocaleString()}</td>
+                    <td class="text-right text-gray-600">${worker.difficulty.toLocaleString()}</td>
+                    <td class="text-sm text-gray-500">${formatRelativeTime(worker.last_seen)}</td>
+                    <td><span class="worker-online">在线</span></td>
+                `;
+                tbody.appendChild(row);
+            }
+
+            updateChart(workers);
+            document.getElementById('last-update').textContent = new Date().toLocaleString('zh-CN');
+
+            // Load recent shares after main data
+            loadRecentShares(data.address);
+            loadPayouts(data.address);
+        }
+
+        function updateChart(workers) {
+            const ctx = document.getElementById('sharesChart').getContext('2d');
+
+            const labels = workers.map(w => w.name);
+            const sharesData = workers.map(w => w.shares);
+
+            if (sharesChart) {
+                sharesChart.data.labels = labels;
+                sharesChart.data.datasets[0].data = sharesData;
+                sharesChart.update();
+            } else {
+                sharesChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Shares',
+                            data: sharesData,
+                            backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                            borderColor: 'rgb(59, 130, 246)',
+                            borderWidth: 0,
+                            borderRadius: 6,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                grid: { color: '#f1f5f9' },
+                                ticks: { color: '#94a3b8' }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: {
+                                    color: '#94a3b8',
+                                    maxRotation: 45,
+                                    minRotation: 0
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').classList.toggle('hidden', !show);
+            document.getElementById('stats-content').classList.add('hidden');
+            document.getElementById('no-data').classList.add('hidden');
+        }
+
+        function showNoData() {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('stats-content').classList.add('hidden');
+            document.getElementById('no-data').classList.remove('hidden');
+        }
+
+        function showStats() {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('stats-content').classList.remove('hidden');
+            document.getElementById('no-data').classList.add('hidden');
+        }
+
+        // Copy address to clipboard
+        async function copyAddress() {
+            const address = document.getElementById('stats-address').textContent;
+            if (address && address !== '--') {
+                try {
+                    await navigator.clipboard.writeText(address);
+                    // Show temporary success message
+                    const btn = event.target;
+                    const originalText = btn.textContent;
+                    btn.textContent = '✓ 已复制';
+                    btn.classList.add('bg-green-100');
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.classList.remove('bg-green-100');
+                    }, 2000);
+                } catch (err) {
+                    alert('复制失败，请手动复制');
+                }
+            }
+        }
+
+        // Show QR Code
+        function showQRCode() {
+            const address = document.getElementById('stats-address').textContent;
+            if (!address || address === '--') {
+                alert('没有可显示的地址');
+                return;
+            }
+
+            const qrDiv = document.getElementById('qrcode');
+            qrDiv.innerHTML = '';
+
+            // Use a simple QR code API
+            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(address)}`;
+
+            const img = document.createElement('img');
+            img.src = qrUrl;
+            img.alt = 'QR Code';
+            img.className = 'w-full h-full';
+            img.onerror = () => {
+                qrDiv.innerHTML = '<p class="text-red-500 text-sm">QR码生成失败</p>';
+            };
+
+            qrDiv.appendChild(img);
+            document.getElementById('qrcode-modal').classList.remove('hidden');
+        }
+
+        // Hide QR Code
+        function hideQRCode() {
+            document.getElementById('qrcode-modal').classList.add('hidden');
+        }
+
+        // Load recent shares
+        async function loadRecentShares(address) {
+            try {
+                const response = await fetch(`/api/observer/${encodeURIComponent(address)}/shares?limit=20`);
+                const result = await response.json();
+
+                if (result.status === 'ok') {
+                    const tbody = document.getElementById('shares-table-body');
+                    tbody.innerHTML = '';
+
+                    if (result.data.shares.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-gray-500">暂无最近份额</td></tr>';
+                    } else {
+                        result.data.shares.forEach(share => {
+                            const row = document.createElement('tr');
+                            const date = new Date(share.timestamp * 1000);
+                            row.innerHTML = `
+                                <td class="mono text-sm">${formatTimestamp(date)}</td>
+                                <td class="text-right font-medium">${share.difficulty.toLocaleString()}</td>
+                                <td>${share.worker_name}</td>
+                                <td><span class="worker-online">有效</span></td>
+                            `;
+                            tbody.appendChild(row);
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load shares:', error);
+            }
+        }
+
+        // Load payouts
+        async function loadPayouts(address) {
+            try {
+                const response = await fetch(`/api/observer/${encodeURIComponent(address)}/payouts`);
+                const result = await response.json();
+
+                if (result.status === 'ok') {
+                    if (result.data.total_payouts === 0) {
+                        document.querySelector('#payouts .p-6').innerHTML = `
+                            <p class="text-center text-gray-500">
+                                <p>暂无支付记录</p>
+                                <p class="text-sm mt-2">支付功能开发中...</p>
+                            </p>
+                        `;
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load payouts:', error);
+            }
+        }
+
+        async function loadData(address) {
+            if (!address) return;
+
+            currentAddress = address;
+            showLoading(true);
+            document.getElementById('search-error').classList.add('hidden');
+
+            try {
+                const data = await fetchObserverData(address);
+
+                if (data.total_shares === 0) {
+                    showNoData();
+                } else {
+                    updateUI(data);
+                    showStats();
+                }
+            } catch (error) {
+                document.getElementById('search-error').textContent = error.message;
+                document.getElementById('search-error').classList.remove('hidden');
+                showNoData();
+            }
+        }
+
+        document.getElementById('search-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const address = document.getElementById('address-input').value.trim();
+            if (address) {
+                window.location.href = `/observer/${encodeURIComponent(address)}`;
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const addressFromUrl = getAddressFromUrl();
+            if (addressFromUrl) {
+                document.getElementById('address-input').value = addressFromUrl;
+                loadData(addressFromUrl);
+            }
+
+            refreshInterval = setInterval(() => {
+                if (currentAddress) {
+                    fetchObserverData(currentAddress).then(data => {
+                        if (data.total_shares > 0) {
+                            updateUI(data);
+                        }
+                    }).catch(err => console.error('Auto refresh failed:', err));
+                }
+            }, 30000);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,465 @@
+// Copyright (C) 2024, 2025 Hydra-Pool Developers (see AUTHORS)
+//
+// This file is part of Hydra-Pool.
+//
+// Hydra-Pool is free software: you can redistribute it and/or modify it under
+// the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// Hydra-Pool is distributed in the hope that it will be useful, but WITHOUT ANY
+// WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// Hydra-Pool. If not, see <https://www.gnu.org/licenses/>.
+
+mod migration;
+
+use clap::Parser;
+use p2poolv2_api::start_api_server;
+use p2poolv2_lib::accounting::stats::metrics;
+use p2poolv2_lib::config::Config;
+use p2poolv2_lib::logging::setup_logging;
+use p2poolv2_lib::node::actor::NodeHandle;
+use p2poolv2_lib::shares::chain::chain_store::ChainStore;
+use p2poolv2_lib::shares::share_block::ShareBlock;
+use p2poolv2_lib::store::Store;
+use p2poolv2_lib::stratum::client_connections::start_connections_handler;
+use p2poolv2_lib::stratum::emission::Emission;
+use p2poolv2_lib::stratum::server::StratumServerBuilder;
+use p2poolv2_lib::stratum::work::gbt::start_gbt;
+use p2poolv2_lib::stratum::work::notify::start_notify;
+use p2poolv2_lib::stratum::work::tracker::start_tracker_actor;
+use p2poolv2_lib::stratum::zmq_listener::{ZmqListener, ZmqListenerTrait};
+use dmpool::payment::{PaymentManager, PaymentConfig};
+use dmpool::{DatabaseManager, observer_api, admin_api};
+use std::path::PathBuf;
+use std::process::exit;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::oneshot;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
+
+/// Interval in seconds to poll for new block templates since the last zmq signal
+const GBT_POLL_INTERVAL: u64 = 10;
+
+/// Maximum number of pending shares from all clients connected to stratum server
+const STRATUM_SHARES_BUFFER_SIZE: usize = 1000;
+
+/// 100% donation in bips, skip address validation
+const FULL_DONATION_BIPS: u16 = 10_000;
+
+/// Notify channel enqueues requests to send notify updates to new
+/// clients. If we have more than notify channel capacity of pending
+/// clients in queue, some will be dropped.
+const NOTIFY_CHANNEL_CAPACITY: usize = 1000;
+
+/// Wait for shutdown signals (Ctrl+C, SIGTERM on Unix) or internal shutdown signal.
+#[cfg(unix)]
+async fn wait_for_shutdown_signal(stopping_rx: oneshot::Receiver<()>) {
+    match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+        Ok(mut sigterm) => {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Received Ctrl+C, initiating graceful shutdown...");
+                }
+                _ = sigterm.recv() => {
+                    info!("Received SIGTERM, initiating graceful shutdown...");
+                }
+                _ = stopping_rx => {
+                    info!("Node stopping due to internal signal...");
+                }
+            }
+        }
+        Err(e) => {
+            warn!("Failed to set up SIGTERM handler: {}. Only Ctrl+C will be monitored.", e);
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Received Ctrl+C, initiating graceful shutdown...");
+                }
+                _ = stopping_rx => {
+                    info!("Node stopping due to internal signal...");
+                }
+            }
+        }
+    }
+}
+
+/// Wait for shutdown signals (Ctrl+C) or internal shutdown signal.
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal(stopping_rx: oneshot::Receiver<()>) {
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            info!("Received Ctrl+C, initiating graceful shutdown...");
+        }
+        _ = stopping_rx => {
+            info!("Node stopping due to internal signal...");
+        }
+    }
+}
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    config: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), String> {
+    info!("Starting DMPool...");
+
+    let args = Args::parse();
+
+    let config = match Config::load(&args.config) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            error!("Failed to load config from {}: {}", args.config, e);
+            return Err(format!("Failed to load config: {}", e));
+        }
+    };
+
+    let _guard = match setup_logging(&config.logging) {
+        Ok(guard) => {
+            info!("Logging set up successfully");
+            guard
+        }
+        Err(e) => {
+            eprintln!("Failed to set up logging: {}. Continuing with stderr output.", e);
+            return Err(format!("Failed to set up logging: {}", e));
+        }
+    };
+
+    let genesis = ShareBlock::build_genesis_for_network(config.stratum.network);
+
+    let store = match Store::new(config.store.path.clone(), false) {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            error!("Failed to initialize database at {}: {}", config.store.path, e);
+            return Err(format!("Database initialization failed: {}", e));
+        }
+    };
+
+    // Run database migrations
+    info!("Running database migrations...");
+    match migration::setup_migrations(store.clone()).await {
+        Ok(version) => {
+            info!("Database migrations complete. Schema version: {}", version);
+        }
+        Err(e) => {
+            error!("Migration failed: {}", e);
+            return Err(format!("Migration failed: {}", e));
+        }
+    }
+
+    let chain_store = Arc::new(ChainStore::new(
+        store.clone(),
+        genesis,
+        config.stratum.network,
+    ));
+
+    let tip = chain_store.store.get_chain_tip();
+    let height = chain_store.get_tip_height();
+    info!("Latest tip {:?} at height {:?}", tip, height);
+
+    // Initialize payment manager
+    let payment_data_dir = std::path::PathBuf::from(&config.store.path).join("payment");
+    let payment_config = PaymentConfig {
+        bitcoin_rpc_url: format!("http://{}", config.bitcoinrpc.url),
+        bitcoin_rpc_user: config.bitcoinrpc.username.clone(),
+        bitcoin_rpc_pass: config.bitcoinrpc.password.clone(),
+        ..Default::default()
+    };
+    let payment_manager = match PaymentManager::new(payment_data_dir, payment_config) {
+        Ok(pm) => Arc::new(pm),
+        Err(e) => {
+            error!("Failed to initialize payment manager: {}", e);
+            return Err(format!("Payment manager initialization failed: {}", e));
+        }
+    };
+    info!("Payment manager initialized");
+
+    // Initialize DatabaseManager for Observer and Admin APIs
+    // Build PostgreSQL connection string from existing store path
+    let db_path = std::path::PathBuf::from(&config.store.path);
+    let db_conn_string = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| format!("postgresql://dmpool:dmpool@localhost:5432/dmpool"));
+
+    let db_manager = match DatabaseManager::new(&db_conn_string) {
+        Ok(db) => Arc::new(db),
+        Err(e) => {
+            error!("Failed to initialize database manager: {}", e);
+            return Err(format!("Database manager initialization failed: {}", e));
+        }
+    };
+
+    // Test database connection
+    if let Err(e) = db_manager.test_connection().await {
+        error!("Database connection test failed: {}", e);
+        warn!("Continuing without database. Observer and Admin APIs will have limited functionality.");
+    } else {
+        info!("Database connection successful");
+
+        // Initialize admin tables
+        match db_manager.init_admin_tables().await {
+            Ok(()) => info!("Admin tables initialized"),
+            Err(e) => {
+                error!("Failed to initialize admin tables: {}", e);
+                warn!("Some admin features may not work properly.");
+            }
+        }
+    }
+
+    let background_tasks_store = store.clone();
+    p2poolv2_lib::store::background_tasks::start_background_tasks(
+        background_tasks_store,
+        Duration::from_secs(config.store.background_task_frequency_hours * 3600),
+        Duration::from_secs(config.store.pplns_ttl_days * 3600 * 24),
+    );
+
+    let stratum_config = match config.stratum.clone().parse() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            error!("Failed to parse stratum configuration: {}", e);
+            return Err(format!("Invalid stratum configuration: {}", e));
+        }
+    };
+    let bitcoinrpc_config = config.bitcoinrpc.clone();
+
+    let (stratum_shutdown_tx, stratum_shutdown_rx) = tokio::sync::oneshot::channel();
+    let (notify_tx, notify_rx) = tokio::sync::mpsc::channel(NOTIFY_CHANNEL_CAPACITY);
+    let tracker_handle = start_tracker_actor();
+
+    let notify_tx_for_gbt = notify_tx.clone();
+    let bitcoinrpc_config_cloned = bitcoinrpc_config.clone();
+
+    let zmq_trigger_rx = match ZmqListener.start(&stratum_config.zmqpubhashblock) {
+        Ok(rx) => rx,
+        Err(e) => {
+            error!("Failed to set up ZMQ publisher: {}", e);
+            return Err(format!("Failed to set up ZMQ publisher: {}", e));
+        }
+    };
+
+    tokio::spawn(async move {
+        if let Err(e) = start_gbt(
+            bitcoinrpc_config_cloned,
+            notify_tx_for_gbt,
+            GBT_POLL_INTERVAL,
+            stratum_config.network,
+            zmq_trigger_rx,
+        )
+        .await
+        {
+            tracing::error!("Failed to fetch block template. Shutting down. \n {}", e);
+            exit(1);
+        }
+    });
+
+    let connections_handle = start_connections_handler().await;
+    let connections_cloned = connections_handle.clone();
+
+    let tracker_handle_cloned = tracker_handle.clone();
+    let store_for_notify = chain_store.clone();
+
+    let cloned_stratum_config = stratum_config.clone();
+    tokio::spawn(async move {
+        info!("Starting Stratum notifier...");
+        start_notify(
+            notify_rx,
+            connections_cloned,
+            store_for_notify,
+            tracker_handle_cloned,
+            &cloned_stratum_config,
+            None,
+        )
+        .await;
+    });
+
+    let (emissions_tx, emissions_rx) =
+        tokio::sync::mpsc::channel::<Emission>(STRATUM_SHARES_BUFFER_SIZE);
+
+    let metrics_handle = match metrics::start_metrics(config.logging.stats_dir.clone()).await {
+        Ok(handle) => handle,
+        Err(e) => {
+            return Err(format!("Failed to start metrics: {}", e));
+        }
+    };
+    let metrics_cloned = metrics_handle.clone();
+    let metrics_for_shutdown = metrics_handle.clone();
+    let stats_dir_for_shutdown = config.logging.stats_dir.clone();
+    let store_for_stratum = chain_store.clone();
+    let tracker_handle_cloned = tracker_handle.clone();
+
+    let stratum_server_result = StratumServerBuilder::default()
+        .shutdown_rx(stratum_shutdown_rx)
+        .connections_handle(connections_handle.clone())
+        .emissions_tx(emissions_tx)
+        .hostname(stratum_config.hostname)
+        .port(stratum_config.port)
+        .start_difficulty(stratum_config.start_difficulty)
+        .minimum_difficulty(stratum_config.minimum_difficulty)
+        .maximum_difficulty(stratum_config.maximum_difficulty)
+        .ignore_difficulty(stratum_config.ignore_difficulty)
+        .validate_addresses(Some(
+            stratum_config.donation.unwrap_or_default() != FULL_DONATION_BIPS,
+        ))
+        .network(stratum_config.network)
+        .version_mask(stratum_config.version_mask)
+        .store(store_for_stratum)
+        .build()
+        .await;
+
+    let mut stratum_server = match stratum_server_result {
+        Ok(server) => server,
+        Err(e) => {
+            error!("Failed to build Stratum server: {}", e);
+            return Err(format!("Failed to build Stratum server: {}", e));
+        }
+    };
+
+    tokio::spawn(async move {
+        info!("Starting Stratum server...");
+        let result = stratum_server
+            .start(
+                None,
+                notify_tx,
+                tracker_handle_cloned,
+                bitcoinrpc_config,
+                metrics_cloned,
+            )
+            .await;
+        if let Err(e) = result {
+            error!("Stratum server error: {}", e);
+        }
+        info!("Stratum server stopped");
+    });
+
+    let api_shutdown_tx = match start_api_server(
+        config.api.clone(),
+        chain_store.clone(),
+        metrics_handle.clone(),
+        tracker_handle,
+        stratum_config.network,
+        stratum_config.pool_signature,
+    )
+    .await
+    {
+        Ok(shutdown_tx) => shutdown_tx,
+        Err(e) => {
+            info!("Error starting API server: {}", e);
+            return Err(format!("Failed to start API Server: {}", e));
+        }
+    };
+    info!(
+        "API server started on host {} port {}",
+        config.api.hostname, config.api.port
+    );
+
+    // Start Observer API service on separate port
+    let observer_api_host = std::env::var("OBSERVER_API_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let observer_api_port = std::env::var("OBSERVER_API_PORT")
+        .unwrap_or_else(|_| "8082".to_string())
+        .parse::<u16>()
+        .unwrap_or(8082);
+
+    let observer_api_handle = match observer_api::start_observer_api(
+        db_manager.clone(),
+        observer_api_host,
+        observer_api_port,
+    ).await {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            error!("Failed to start Observer API: {}", e);
+            warn!("Continuing without Observer API. Public endpoints will not be available.");
+            None
+        }
+    };
+
+    if observer_api_handle.is_some() {
+        info!("Observer API started on http://{}:{}", observer_api_host, observer_api_port);
+    }
+
+    // Start Admin API service
+    let admin_api_host = std::env::var("ADMIN_API_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let admin_api_port = std::env::var("ADMIN_API_PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse::<u16>()
+        .unwrap_or(8080);
+
+    let admin_api_handle = match admin_api::start_admin_api(
+        db_manager.clone(),
+        admin_api_host,
+        admin_api_port,
+    ).await {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            error!("Failed to start Admin API: {}", e);
+            warn!("Continuing without Admin API. Management features will not be available.");
+            None
+        }
+    };
+
+    if admin_api_handle.is_some() {
+        info!("Admin API started on http://{}:{} (internal only)", admin_api_host, admin_api_port);
+    }
+
+    match NodeHandle::new(config, chain_store.clone(), emissions_rx, metrics_handle).await {
+        Ok((node_handle, stopping_rx)) => {
+            info!("Node started");
+
+            // Reward distribution is handled by Hydrapool core
+            // PaymentManager is used only for historical records display
+
+            wait_for_shutdown_signal(stopping_rx).await;
+
+            info!("Node shutting down ...");
+
+            if let Err(e) = node_handle.shutdown().await {
+                error!("Error during node shutdown: {}", e);
+            }
+
+            let metrics = metrics_for_shutdown.get_metrics().await;
+            if let Err(e) = p2poolv2_lib::accounting::stats::pool_local_stats::save_pool_local_stats(
+                &metrics,
+                &stats_dir_for_shutdown,
+            ) {
+                error!("Failed to save metrics on shutdown: {}", e);
+            } else {
+                info!("Metrics saved on shutdown");
+            }
+
+            if let Err(_) = stratum_shutdown_tx.send(()) {
+                warn!("Failed to send shutdown signal to Stratum server (may already be shut down)");
+            }
+
+            if let Err(_) = api_shutdown_tx.send(()) {
+                warn!("Failed to send shutdown signal to API server (may already be shut down)");
+            }
+
+            // Shutdown Observer API if running
+            if let Some(handle) = observer_api_handle {
+                handle.abort();
+                info!("Observer API stopped");
+            }
+
+            // Shutdown Admin API if running
+            if let Some(handle) = admin_api_handle {
+                handle.abort();
+                info!("Admin API stopped");
+            }
+
+            // PaymentManager cleanup is handled by Drop implementation
+
+            info!("Node stopped");
+        }
+        Err(e) => {
+            error!("Failed to start node: {}", e);
+            return Err(format!("Failed to start node: {}", e));
+        }
+    }
+    Ok(())
+}

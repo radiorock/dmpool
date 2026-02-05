@@ -1,0 +1,10 @@
+[Unit]
+Description=DMPool Daily Backup Timer
+Requires=dmpool-backup.service
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
