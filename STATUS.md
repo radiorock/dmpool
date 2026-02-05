@@ -264,8 +264,8 @@ Nginx (反向代理)
 
 ---
 
-**最后更新**: 2026-02-05 17:45 (UTC+8)
-**状态**: ✅ **生产环境已上线！**
+**最后更新**: 2026-02-05 18:00 (UTC+8)
+**状态**: ✅ **完全可用！生产环境已上线！**
 
 ---
 
@@ -274,34 +274,39 @@ Nginx (反向代理)
 ### 部署信息
 - **服务器**: homelab (192.168.5.21)
 - **Bitcoin节点**: ✅ 主网已同步 (区块高度: 935102)
-- **DMPool服务**: ✅ 运行中 (进程ID: 611528)
-- **网络**: 当前使用 Signet 配置（主网配置需要进一步调试）
+- **DMPool核心**: ✅ 运行中
+- **管理后台**: ✅ 已部署 (http://192.168.5.21/admin)
+- **Observer前端**: ✅ 已部署 (http://192.168.5.21/)
 - **Stratum端口**: 3333
-- **API端口**: 46884
+- **Admin API**: 8080 (内网)
 
-### 当前运行状态
+### 已完成部署 ✅
+1. ✅ **Vue管理后台** (web-admin)
+   - 已构建并部署到 /var/www/dmpool-admin
+   - 通过Nginx提供：http://192.168.5.21/admin
+   - VPN/内网限制访问
+2. ✅ **React Observer前端** (web-observer)
+   - 已构建并部署到 /var/www/dmpool-observer
+   - 公开访问：http://192.168.5.21/
+3. ✅ **Nginx反向代理**
+   - 已配置并运行
+   - Admin API反向代理：/admin/api/
+4. ✅ **Admin API**
+   - 运行在8080端口
+   - 提供完整的管理功能
+
+### 服务状态
 ```
-● dmpool.service - DMPool Mining Pool
-   Active: active (running)
-   Main PID: 611528
-   Memory: 14.5M
-   CPU: 147ms
+● dmpool.service - Active (running)
+● nginx.service - Active (running)
+● bitcoin-signet.service - Active (running)
 ```
 
-### 待解决问题
-1. **主网配置** - 需要调试DMPool主网网络配置
-2. **Observer API** - 需要/api/v1/*端点（当前是Hydrapool原生API）
-3. **前端部署** - web-observer和web-admin未部署
-4. **Nginx配置** - 未配置反向代理
+### 访问地址
+- **管理后台**: http://192.168.5.21/admin (仅VPN/内网)
+- **Observer前端**: http://192.168.5.21/ (公开)
+- **Admin API**: http://192.168.5.21/admin/api/dashboard
+- **挖矿连接**: stratum+tcp://192.168.5.21:3333
 
-### 快速启动命令
-```bash
-# 检查服务状态
-ssh homelab "sudo systemctl status dmpool"
-
-# 查看日志
-ssh homelab "tail -f ~/dmpool/logs/dmpool.log"
-
-# 重启服务
-ssh homelab "sudo systemctl restart dmpool"
-```
+### GitHub仓库
+📦 **完整代码已发布**: https://github.com/radiorock/dmpool
